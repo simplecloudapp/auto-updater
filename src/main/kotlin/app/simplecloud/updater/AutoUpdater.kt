@@ -1,0 +1,141 @@
+package app.simplecloud.updater
+
+import app.simplecloud.updater.config.ApplicationConfig
+import app.simplecloud.updater.config.VersionConfig
+import app.simplecloud.updater.launcher.AutoUpdaterStartCommand
+import org.apache.logging.log4j.LogManager
+import org.kohsuke.github.GHAsset
+import org.kohsuke.github.GHRelease
+import org.kohsuke.github.GitHub
+import org.kohsuke.github.GitHubBuilder
+import java.io.File
+import java.net.URI
+
+class AutoUpdater(
+    private val autoUpdaterStartCommand: AutoUpdaterStartCommand
+) {
+
+    private val logger = LogManager.getLogger(AutoUpdater::class.java)
+
+    private val applicationConfig = ApplicationConfig.Loader.load(autoUpdaterStartCommand.applicationConfig)
+    private val versionConfigs = VersionConfig.Loader.load(autoUpdaterStartCommand.versionsConfig)
+
+    private val selectedChannelVersionConfig = versionConfigs.find { it.channel == autoUpdaterStartCommand.channel }
+        ?: throw IllegalArgumentException("Version config for channel ${autoUpdaterStartCommand.channel} not found")
+
+    private val currentVersion = getLastUpdatedVersion()
+
+    fun start() {
+        logger.info("Starting AutoUpdater...")
+        logger.info("Found ${selectedChannelVersionConfig.channel} version channel")
+
+        val github = connectToGitHub()
+        val versionToRelease = getSortedReleasesForCurrentChannel(github)
+        if (versionToRelease.isEmpty()) {
+            logger.info("No releases found")
+            return
+        }
+
+        checkAvailableUpdates(versionToRelease)
+    }
+
+    private fun connectToGitHub(): GitHub {
+        logger.info("Connecting to GitHub...")
+        return if (applicationConfig.githubToken != null) {
+            GitHubBuilder().withOAuthToken(applicationConfig.githubToken).build()
+        } else {
+            GitHub.connectAnonymously()
+        }
+    }
+
+    /**
+     * Returns a list of releases for the current channel sorted by version (latest first).
+     */
+    private fun getSortedReleasesForCurrentChannel(github: GitHub): Map<Version, GHRelease> {
+        logger.info("Loading releases for ${applicationConfig.githubRepository}...")
+        return github.getRepository(applicationConfig.githubRepository)
+            .listReleases()
+            .mapNotNull {
+                val version = Regex(selectedChannelVersionConfig.releaseTagRegex).find(it.tagName)?.groupValues?: return@mapNotNull null
+                Version(version[1].toInt(), version[2].toInt(), version[3].toInt()) to it
+            }
+            .filter { (version) ->
+                currentVersion.isZero()
+                    || (autoUpdaterStartCommand.allowMajorUpdates || version.major == currentVersion.major)
+            }
+            .sortedByDescending { it.first }
+            .toMap()
+    }
+
+    private fun checkAvailableUpdates(
+        versionToRelease: Map<Version, GHRelease>
+    ) {
+        val latestVersion = versionToRelease.keys.first()
+        if (latestVersion <= currentVersion) {
+            logger.info("No new version available")
+            return
+        }
+
+        logger.info("New version available: $latestVersion (Current: ${currentVersion})")
+        downloadNewVersion(latestVersion, versionToRelease[latestVersion]!!)
+    }
+
+    private fun downloadNewVersion(
+        version: Version,
+        release: GHRelease
+    ) {
+        logger.info("Downloading new version $version...")
+        val asset = release.listAssets().firstOrNull { it.name == applicationConfig.releaseFile }
+            ?: throw IllegalArgumentException("Release file not found")
+
+        val tempFile = File.createTempFile("update", ".tmp")
+        tempFile.deleteOnExit()
+
+        downloadAsset(asset, tempFile)
+
+        val outputFile = File(applicationConfig.outputFile)
+        tempFile.renameTo(outputFile)
+        saveLastUpdatedVersion(version)
+        logger.info("Successfully downloaded and installed new version $version")
+    }
+
+    private fun downloadAsset(asset: GHAsset, outputFile: File) {
+        val connection =  URI("https://api.github.com/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
+            .toURL()
+            .openConnection()
+
+        connection.setRequestProperty("Accept", "application/octet-stream")
+
+        if (applicationConfig.githubToken != null) {
+            connection.setRequestProperty("Authorization", "Bearer ${applicationConfig.githubToken}")
+        }
+
+        outputFile.parentFile?.mkdirs()
+
+        connection.inputStream.use { input ->
+            outputFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+    }
+
+    private fun getLastUpdatedVersion(): Version {
+        val lastVersionFile = File(autoUpdaterStartCommand.currentVersionFile.toString())
+        if (!lastVersionFile.exists()) {
+            val version = Version(0, 0, 0)
+            saveLastUpdatedVersion(version)
+            return version
+        }
+
+        return lastVersionFile.readText().let {
+            val version = it.split(".").map { it.toInt() }
+            Version(version[0], version[1], version[2])
+        }
+    }
+
+    private fun saveLastUpdatedVersion(version: Version) {
+        val lastVersionFile = File(autoUpdaterStartCommand.currentVersionFile.toString())
+        lastVersionFile.writeText("$version")
+    }
+
+}
