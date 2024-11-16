@@ -24,7 +24,7 @@ class AutoUpdaterStartCommand: CliktCommand() {
         .default("release")
 
     val allowMajorUpdates by option("--allow-major-updates", help = "Allow major version updates")
-        .flag(default = true)
+        .flag(default = false)
 
     override fun run() {
         AutoUpdater(this).start()

@@ -42,8 +42,13 @@ class AutoUpdater(
     private fun connectToGitHub(): GitHub {
         logger.info("Connecting to GitHub...")
         return if (applicationConfig.githubToken != null) {
+            logger.info("Using GitHub token from application config")
             GitHubBuilder().withOAuthToken(applicationConfig.githubToken).build()
+        } else if (System.getenv("SC_GITHUB_TOKEN") != null) {
+            logger.info("Using GitHub token from environment variable SC_GITHUB_TOKEN")
+            GitHubBuilder().withOAuthToken(System.getenv("SC_GITHUB_TOKEN")).build()
         } else {
+            logger.info("Using anonymous GitHub connection")
             GitHub.connectAnonymously()
         }
     }
@@ -56,12 +61,13 @@ class AutoUpdater(
         return github.getRepository(applicationConfig.githubRepository)
             .listReleases()
             .mapNotNull {
-                val version = Regex(selectedChannelVersionConfig.releaseTagRegex).find(it.tagName)?.groupValues?: return@mapNotNull null
+                val version = Regex(selectedChannelVersionConfig.releaseTagRegex).find(it.tagName)?.groupValues
+                    ?: return@mapNotNull null
                 Version(version[1].toInt(), version[2].toInt(), version[3].toInt()) to it
             }
             .filter { (version) ->
                 currentVersion.isZero()
-                    || (autoUpdaterStartCommand.allowMajorUpdates || version.major == currentVersion.major)
+                        || (autoUpdaterStartCommand.allowMajorUpdates || version.major == currentVersion.major)
             }
             .sortedByDescending { it.first }
             .toMap()
@@ -100,14 +106,15 @@ class AutoUpdater(
     }
 
     private fun downloadAsset(asset: GHAsset, outputFile: File) {
-        val connection =  URI("https://api.github.com/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
-            .toURL()
-            .openConnection()
+        val connection =
+            URI("https://api.github.com/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
+                .toURL()
+                .openConnection()
 
         connection.setRequestProperty("Accept", "application/octet-stream")
 
-        if (applicationConfig.githubToken != null) {
-            connection.setRequestProperty("Authorization", "Bearer ${applicationConfig.githubToken}")
+        if (applicationConfig.githubToken != null || System.getenv("SC_GITHUB_TOKEN") != null) {
+            connection.setRequestProperty("Authorization", "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}")
         }
 
         outputFile.parentFile?.mkdirs()
