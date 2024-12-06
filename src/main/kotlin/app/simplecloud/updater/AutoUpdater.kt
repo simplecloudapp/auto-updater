@@ -94,13 +94,10 @@ class AutoUpdater(
         val asset = release.listAssets().firstOrNull { it.name == applicationConfig.releaseFile }
             ?: throw IllegalArgumentException("Release file not found")
 
-        val tempFile = File.createTempFile("update", ".tmp")
-        tempFile.deleteOnExit()
+        val file = File(applicationConfig.outputFile)
+        logger.info("Downloading to ${file.absolutePath}")
+        downloadAsset(asset, file)
 
-        downloadAsset(asset, tempFile)
-
-        val outputFile = File(applicationConfig.outputFile)
-        tempFile.renameTo(outputFile)
         saveLastUpdatedVersion(version)
         logger.info("Successfully downloaded and installed new version $version")
     }
@@ -117,7 +114,9 @@ class AutoUpdater(
             connection.setRequestProperty("Authorization", "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}")
         }
 
+        outputFile.delete()
         outputFile.parentFile?.mkdirs()
+        outputFile.createNewFile()
 
         connection.inputStream.use { input ->
             outputFile.outputStream().use { output ->
