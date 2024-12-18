@@ -1,6 +1,7 @@
 package app.simplecloud.updater
 
 import app.simplecloud.updater.config.ApplicationConfig
+import app.simplecloud.updater.config.UpdateEntryConfig
 import app.simplecloud.updater.config.VersionConfig
 import app.simplecloud.updater.launcher.AutoUpdaterStartCommand
 import org.apache.logging.log4j.LogManager
@@ -91,15 +92,28 @@ class AutoUpdater(
         release: GHRelease
     ) {
         logger.info("Downloading new version $version...")
-        val asset = release.listAssets().firstOrNull { it.name == applicationConfig.releaseFile }
+        val assets = release.listAssets().toList()
+
+        applicationConfig.files.forEach { updateEntryConfig ->
+            downloadNewVersion(version, assets, updateEntryConfig)
+        }
+
+        logger.info("Successfully downloaded and installed new version $version")
+    }
+
+    private fun downloadNewVersion(
+        version: Version,
+        assets: List<GHAsset>,
+        updateEntryConfig: UpdateEntryConfig
+    ) {
+        val asset = assets.firstOrNull { it.name == updateEntryConfig.releaseFile }
             ?: throw IllegalArgumentException("Release file not found")
 
-        val file = File(applicationConfig.outputFile)
+        val file = File(updateEntryConfig.outputFile)
         logger.info("Downloading to ${file.absolutePath}")
         downloadAsset(asset, file)
 
         saveLastUpdatedVersion(version)
-        logger.info("Successfully downloaded and installed new version $version")
     }
 
     private fun downloadAsset(asset: GHAsset, outputFile: File) {

@@ -12,8 +12,7 @@ import kotlin.io.path.exists
 data class ApplicationConfig(
     val githubRepository: String = "",
     val githubToken: String? = null,
-    val releaseFile: String = "",
-    val outputFile: String = ""
+    val files: List<UpdateEntryConfig> = emptyList()
 ) {
 
     object Loader {
