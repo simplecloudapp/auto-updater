@@ -6,6 +6,7 @@ log4j = "2.20.0"
 configurate = "4.1.2"
 clikt = "4.3.0"
 github = "1.326"
+okhttp = "4.12.0"
 
 [libraries]
 kotlinJvm = { module = "org.jetbrains.kotlin:kotlin-stdlib-jdk8", version.ref = "kotlin" }
@@ -23,6 +24,8 @@ configurateExtraKotlin = { module = "org.spongepowered:configurate-extra-kotlin"
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 
 github = { module = "org.kohsuke:github-api", version.ref = "github" }
+
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 
 [bundles]
 log4j = [

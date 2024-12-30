@@ -16,10 +16,12 @@ repositories {
 dependencies {
     testImplementation(rootProject.libs.kotlinTest)
     implementation(rootProject.libs.kotlinJvm)
+    implementation(rootProject.libs.kotlinCoroutines)
     implementation(rootProject.libs.bundles.log4j)
     implementation(rootProject.libs.bundles.configurate)
     implementation(rootProject.libs.clikt)
     implementation(rootProject.libs.github)
+    implementation(rootProject.libs.okhttp)
 }
 
 application {

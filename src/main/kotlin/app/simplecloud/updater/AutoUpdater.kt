@@ -4,13 +4,17 @@ import app.simplecloud.updater.config.ApplicationConfig
 import app.simplecloud.updater.config.UpdateEntryConfig
 import app.simplecloud.updater.config.VersionConfig
 import app.simplecloud.updater.launcher.AutoUpdaterStartCommand
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import org.apache.logging.log4j.LogManager
 import org.kohsuke.github.GHAsset
 import org.kohsuke.github.GHRelease
 import org.kohsuke.github.GitHub
 import org.kohsuke.github.GitHubBuilder
+import org.kohsuke.github.extras.okhttp3.OkHttpGitHubConnector
 import java.io.File
 import java.net.URI
+import java.util.concurrent.TimeUnit
 
 class AutoUpdater(
     private val autoUpdaterStartCommand: AutoUpdaterStartCommand
@@ -25,6 +29,29 @@ class AutoUpdater(
         ?: throw IllegalArgumentException("Version config for channel ${autoUpdaterStartCommand.channel} not found")
 
     private val currentVersion = getLastUpdatedVersion()
+
+    private val githubUrlInterceptor = Interceptor { chain ->
+        val original = chain.request()
+        val originalUrl = original.url.toString()
+
+        val newUrl = originalUrl.replace(
+            "api.github.com",
+            "gha.simplecloud.app"
+        )
+
+        val newRequest = original.newBuilder()
+            .url(newUrl)
+            .build()
+
+        chain.proceed(newRequest)
+    }
+
+    private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(githubUrlInterceptor)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     fun start() {
         logger.info("Starting AutoUpdater...")
@@ -42,15 +69,24 @@ class AutoUpdater(
 
     private fun connectToGitHub(): GitHub {
         logger.info("Connecting to GitHub...")
-        return if (applicationConfig.githubToken != null) {
-            logger.info("Using GitHub token from application config")
-            GitHubBuilder().withOAuthToken(applicationConfig.githubToken).build()
-        } else if (System.getenv("SC_GITHUB_TOKEN") != null) {
-            logger.info("Using GitHub token from environment variable SC_GITHUB_TOKEN")
-            GitHubBuilder().withOAuthToken(System.getenv("SC_GITHUB_TOKEN")).build()
-        } else {
-            logger.info("Using anonymous GitHub connection")
-            GitHub.connectAnonymously()
+        val builder = GitHubBuilder()
+            .withConnector(OkHttpGitHubConnector(okHttpClient))
+
+        return when {
+            applicationConfig.githubToken != null -> {
+                logger.info("Using GitHub token from application config")
+                builder.withOAuthToken(applicationConfig.githubToken).build()
+            }
+
+            System.getenv("SC_GITHUB_TOKEN") != null -> {
+                logger.info("Using GitHub token from environment variable SC_GITHUB_TOKEN")
+                builder.withOAuthToken(System.getenv("SC_GITHUB_TOKEN")).build()
+            }
+
+            else -> {
+                logger.info("Using anonymous GitHub connection")
+                builder.build()
+            }
         }
     }
 
@@ -59,8 +95,29 @@ class AutoUpdater(
      */
     private fun getSortedReleasesForCurrentChannel(github: GitHub): Map<Version, GHRelease> {
         logger.info("Loading releases for ${applicationConfig.githubRepository}...")
-        return github.getRepository(applicationConfig.githubRepository)
-            .listReleases()
+        val repository = github.getRepository(applicationConfig.githubRepository)
+
+        // First try to get the latest release
+        try {
+            val latestRelease = repository.latestRelease
+            val version = Regex(selectedChannelVersionConfig.releaseTagRegex).find(latestRelease.tagName)?.groupValues
+            if (version != null) {
+                val parsedVersion = Version(version[1].toInt(), version[2].toInt(), version[3].toInt())
+                // Check if the version matches our criteria
+                if (currentVersion.isZero() ||
+                    (autoUpdaterStartCommand.allowMajorUpdates || parsedVersion.major == currentVersion.major)
+                ) {
+                    logger.info("Found matching latest release: ${latestRelease.tagName}")
+                    return mapOf(parsedVersion to latestRelease)
+                }
+            }
+            logger.info("Latest release doesn't match criteria, falling back to release list")
+        } catch (e: Exception) {
+            logger.info("Failed to get latest release, falling back to release list: ${e.message}")
+        }
+
+        // Fallback to listing all releases
+        return repository.listReleases()
             .mapNotNull {
                 val version = Regex(selectedChannelVersionConfig.releaseTagRegex).find(it.tagName)?.groupValues
                     ?: return@mapNotNull null
@@ -118,14 +175,17 @@ class AutoUpdater(
 
     private fun downloadAsset(asset: GHAsset, outputFile: File) {
         val connection =
-            URI("https://api.github.com/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
+            URI("https://gha.simplecloud.app/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
                 .toURL()
                 .openConnection()
 
         connection.setRequestProperty("Accept", "application/octet-stream")
 
         if (applicationConfig.githubToken != null || System.getenv("SC_GITHUB_TOKEN") != null) {
-            connection.setRequestProperty("Authorization", "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}")
+            connection.setRequestProperty(
+                "Authorization",
+                "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}"
+            )
         }
 
         outputFile.delete()
