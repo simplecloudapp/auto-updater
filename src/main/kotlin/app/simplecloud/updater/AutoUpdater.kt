@@ -13,7 +13,11 @@ import org.kohsuke.github.GitHub
 import org.kohsuke.github.GitHubBuilder
 import org.kohsuke.github.extras.okhttp3.OkHttpGitHubConnector
 import java.io.File
+import java.io.IOException
 import java.net.URI
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 
 class AutoUpdater(
@@ -168,34 +172,93 @@ class AutoUpdater(
 
         val file = File(updateEntryConfig.outputFile)
         logger.info("Downloading to ${file.absolutePath}")
-        downloadAsset(asset, file)
+        downloadAssetWithRetry(asset, file)
 
         saveLastUpdatedVersion(version)
     }
 
-    private fun downloadAsset(asset: GHAsset, outputFile: File) {
-        val connection =
-            URI("https://gha.simplecloud.app/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
-                .toURL()
-                .openConnection()
-
-        connection.setRequestProperty("Accept", "application/octet-stream")
-
-        if (applicationConfig.githubToken != null || System.getenv("SC_GITHUB_TOKEN") != null) {
-            connection.setRequestProperty(
-                "Authorization",
-                "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}"
-            )
-        }
-
-        outputFile.delete()
-        outputFile.parentFile?.mkdirs()
-        outputFile.createNewFile()
-
-        connection.inputStream.use { input ->
-            outputFile.outputStream().use { output ->
-                input.copyTo(output)
+    private fun downloadAssetWithRetry(
+        asset: GHAsset,
+        outputFile: File,
+        maxRetries: Int = 3,
+        delayMs: Long = 1000
+    ) {
+        var lastException: Exception? = null
+        for (attempt in 1..maxRetries) {
+            try {
+                downloadAsset(asset, outputFile)
+                return
+            } catch (e: Exception) {
+                lastException = e
+                logger.warn("Download attempt $attempt failed: ${e.message}")
+                if (attempt < maxRetries) {
+                    Thread.sleep(delayMs * attempt) // Exponential backoff
+                }
             }
+        }
+        throw lastException ?: IOException("Failed to download after $maxRetries attempts")
+    }
+
+    private fun downloadAsset(asset: GHAsset, outputFile: File) {
+        val tempPath = Files.createTempFile(
+            outputFile.parentFile?.toPath() ?: Files.createTempDirectory("download"),
+            "download_",
+            ".tmp"
+        )
+
+        try {
+            val connection =
+                URI("https://gha.simplecloud.app/repos/${applicationConfig.githubRepository}/releases/assets/${asset.id}")
+                    .toURL()
+                    .openConnection()
+
+            connection.setRequestProperty("Accept", "application/octet-stream")
+
+            if (applicationConfig.githubToken != null || System.getenv("SC_GITHUB_TOKEN") != null) {
+                connection.setRequestProperty(
+                    "Authorization",
+                    "Bearer ${applicationConfig.githubToken ?: System.getenv("SC_GITHUB_TOKEN")}"
+                )
+            }
+
+            // Ensure parent directory exists
+            outputFile.parentFile?.mkdirs()
+
+            // Download with proper buffering
+            connection.inputStream.buffered().use { input ->
+                Files.newOutputStream(tempPath).buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                    }
+                    output.flush()
+                }
+            }
+
+            // Use atomic move operation with Java NIO
+            try {
+                Files.move(
+                    tempPath,
+                    outputFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+                )
+            } catch (e: AtomicMoveNotSupportedException) {
+                // Fallback for filesystems that don't support atomic moves
+                Files.move(
+                    tempPath,
+                    outputFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to download asset: ${e.message}")
+            Files.deleteIfExists(tempPath)
+            throw e
+        } finally {
+            // Cleanup temp file if it still exists
+            Files.deleteIfExists(tempPath)
         }
     }
 
