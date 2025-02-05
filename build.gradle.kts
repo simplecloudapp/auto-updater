@@ -37,6 +37,7 @@ kotlin {
 
 tasks.named("shadowJar", ShadowJar::class) {
     mergeServiceFiles()
+
     archiveFileName.set("${project.name}.jar")
 }
 

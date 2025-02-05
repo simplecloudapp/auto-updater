@@ -30,7 +30,9 @@ class ReposiliteAutoUpdater(
 
     private val logger = LogManager.getLogger(ReposiliteAutoUpdater::class.java)
 
-    private val config = ReposiliteConfig.load(startCommand.applicationConfig)
+    private val config = runCatching {
+        ReposiliteConfig.load(startCommand.applicationConfig)
+    }.getOrNull()
 
     private val client by lazy {
         OkHttpClient.Builder()
@@ -40,11 +42,12 @@ class ReposiliteAutoUpdater(
     }
 
     fun start() {
-        logger.info("Starting AutoUpdater for GroupID: ${config.groupId}...")
-
+        if (config == null) return
         if (config.files.isEmpty()) {
             throw IllegalStateException("No FileConfig found. Aborting AutoUpdater...")
         }
+
+        logger.info("Starting AutoUpdater for GroupID: ${config.groupId}...")
 
         val currentVersion = runCatching {
             Files.readString(startCommand.currentVersionFile)
@@ -177,7 +180,7 @@ class ReposiliteAutoUpdater(
         buildPath(config.artifact, "$version/${config.getReleaseFile(version)}")
 
     private fun buildPath(artifactId: String, suffix: String): String =
-        "${config.groupId.replace('.', '/')}/${artifactId}/$suffix"
+        "${config!!.groupId.replace('.', '/')}/${artifactId}/$suffix"
 
     private fun buildRequest(path: String): Request =
         Request.Builder()
