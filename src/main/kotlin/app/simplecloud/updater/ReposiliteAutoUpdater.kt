@@ -47,7 +47,7 @@ class ReposiliteAutoUpdater(
             throw IllegalStateException("No FileConfig found. Aborting AutoUpdater...")
         }
 
-        logger.info("Starting AutoUpdater for GroupID: ${config.groupId}...")
+        logger.info("Starting AutoUpdater for GroupID: ${config.groupId}")
 
         val currentVersion = runCatching {
             Files.readString(startCommand.currentVersionFile)
@@ -66,7 +66,7 @@ class ReposiliteAutoUpdater(
                 return@forEach
             }
 
-            logger.info("Found update for ${config.groupId}, updating to version $latestVersion...")
+            logger.info("Found update for ${config.groupId}.${fileConfig.artifact}, updating to version $latestVersion...")
 
             val version = latestVersion ?: return@forEach
             downloadArtifact(version, fileConfig).onSuccess {
@@ -77,6 +77,8 @@ class ReposiliteAutoUpdater(
                         StandardOpenOption.CREATE,
                         StandardOpenOption.TRUNCATE_EXISTING
                     )
+
+                    logger.info("Finished Updating for GroupID: ${config?.groupId}")
                 }.onFailure { error ->
                     logger.error(
                         "Failed to update version file '${startCommand.currentVersionFile}': ${error.message}",
