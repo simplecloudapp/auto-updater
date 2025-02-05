@@ -23,7 +23,6 @@ import javax.xml.parsers.DocumentBuilderFactory
  * This class handles downloading artifacts and retrieving version information from
  * a Reposilite Maven repository. It supports automatic version resolution using maven-metadata.xml
  * and provides safe file downloading with proper error handling.
- *
  */
 class ReposiliteAutoUpdater(
     private val startCommand: AutoUpdaterStartCommand
@@ -86,7 +85,6 @@ class ReposiliteAutoUpdater(
             }
         }
     }
-
 
     /**
      * Retrieves the latest version available in the repository.
