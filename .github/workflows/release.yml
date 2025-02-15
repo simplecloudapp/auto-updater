@@ -120,7 +120,7 @@ jobs:
       - name: Prepare Artifacts
         run: |
           mkdir -p release-artifacts
-          find . -type f -name "*.jar" -path "*/build/libs/*.jar" -not -path "./build/libs/*" \
+          find . -type f -name "*.jar" -path "*/build/libs/*.jar" -path "./build/libs/*" \
             -not -name "*${{ steps.version.outputs.VERSION }}*" \
             -exec cp {} release-artifacts/ \;
 
