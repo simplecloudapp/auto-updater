@@ -154,7 +154,7 @@ fun determineVersion(): String {
 }
 
 fun determineRepositoryUrl(): String {
-    val baseUrl = "https://repo.simplecloud.app/"
+    val baseUrl = "https://repo.simplecloud.app"
     return when (project.findProperty("releaseType")?.toString() ?: "snapshot") {
         "release" -> "$baseUrl/releases"
         "rc" -> "$baseUrl/rc"
