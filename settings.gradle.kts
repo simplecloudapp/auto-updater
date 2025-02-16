@@ -1,2 +1,2 @@
-rootProject.name = "updater"
+rootProject.name = "auto-updater"
 

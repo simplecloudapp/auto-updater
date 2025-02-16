@@ -9,7 +9,7 @@ plugins {
     application
 }
 
-group = "app.simplecloud.updater"
+group = "app.simplecloud.auto-updater"
 version = determineVersion()
 
 repositories {
